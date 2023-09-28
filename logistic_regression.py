@@ -1,16 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn import datasets
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression as LR
-
-def prepare_data(X, Y):
-    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2, random_state=42)
-    scaler = StandardScaler()
-    Xtrain = scaler.fit_transform(Xtrain)
-    Xtest = scaler.transform(Xtest)
-    return Xtrain, Xtest, Ytrain, Ytest
+from utils import Data
 
 class LogisticRegression:
     def __init__(self, X, Y, iterations=1000, learning_rate=0.01, verbose=False):
@@ -23,7 +15,6 @@ class LogisticRegression:
         self.gradient_descent(iterations)
 
     def sigmoid(self, z):
-        print(z.shape)
         s = 1 / (1 + np.exp(-z))
         return s
     
@@ -74,41 +65,43 @@ class LogisticRegression:
 
 
 
+# compare to sklearn
+if __name__ == '__main__':
+    print('================= HEART DATASET =================')
+    data = pd.read_csv('heart.csv')
+    Y = data['output']
+    Y = Y.values
+    X = data.drop('output', axis=1).values
+    data = Data(X, Y, [0.8,0.2])
+    Xtrain, Ytrain = data.get_train_data()
+    Xtest, Ytest = data.get_dev_data()
+
+    model = LogisticRegression(Xtrain, Ytrain, 500, 0.01, False)   
+    print(f'My error {round(model.error(Xtest, Ytest), 2)}')
+
+    clf = LR(solver='lbfgs', random_state=42)
+    clf.fit(Xtrain, Ytrain)
+    y_pred = clf.predict(Xtest)
+    accuracy = np.mean(y_pred == Ytest)
+    print(f'Sklearn Error {1 - accuracy}')
 
 
-# HEART dataset
-print('================= HEART DATASET =================')
-data = pd.read_csv('heart.csv')
-Y = data['output']
-Y = Y.values
-X = data.drop('output', axis=1).values
-Xtrain, Xtest, Ytrain, Ytest = prepare_data(X, Y)
+    print('================= IRIS DATASET =================')
+    iris = datasets.load_iris()
+    X = iris["data"]
+    y = (iris["target"] == 0).astype(np.int16)
+    data = Data(X, y, [0.8,0.2])
+    X_train, y_train = data.get_train_data()
+    X_test, y_test = data.get_dev_data()
 
-model = LogisticRegression(Xtrain, Ytrain, 500, 0.01, False)   
-print(f'My error {round(model.error(Xtest, Ytest), 2)}')
+    model = LogisticRegression(X_train, y_train, 4000, 0.01)
+    print(f'My error {round(model.error(X_test, y_test), 4)}')
 
-clf = LR(solver='lbfgs', random_state=42)
-clf.fit(Xtrain, Ytrain)
-y_pred = clf.predict(Xtest)
-accuracy = np.mean(y_pred == Ytest)
-print(f'Sklearn Error:: {1 - accuracy}')
-
-# IRIS dataset
-print('================= IRIS DATASET =================')
-iris = datasets.load_iris()
-X = iris["data"]
-y = (iris["target"] == 0).astype(np.int16)
-X_train, X_test, y_train, y_test = prepare_data(X, y)
-
-
-model = LogisticRegression(X_train, y_train, 4000, 0.01)   
-print(f'My error {round(model.error(X_test, y_test), 2)}')
-
-clf = LR(solver='lbfgs', random_state=42)
-clf.fit(X_train, y_train)
-y_pred = clf.predict(X_test)
-accuracy = np.mean(y_pred == y_test)
-print(f'Sklearn Error: {1 - accuracy}')
-print('================= END =================')
+    clf = LR(solver='lbfgs', random_state=42)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    accuracy = np.mean(y_pred == y_test)
+    print(f'Sklearn Error {1 - accuracy}')
+    print('================= END =================')
 
 
