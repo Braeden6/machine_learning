@@ -49,7 +49,7 @@ class Data:
         return X_splits, Y_splits
 
     @staticmethod
-    def normalize_splits(X_splits):
+    def normalize_splits(X_splits, epsilon=1e-10):
         '''
         Normalize data using index zero as train to get mean and standard deviation.
         :param X_splits: list of X splits
@@ -60,7 +60,7 @@ class Data:
         X_train = X_splits[0]
 
         mean = np.mean(X_train, axis=0)
-        std = np.std(X_train, axis=0)
+        std = np.std(X_train, axis=0) + epsilon # to avoid division by zero
         X_splits = [(X - mean) / std for X in X_splits]
         return X_splits, mean, std
     
@@ -84,6 +84,13 @@ class Data:
             raise Exception("No test data, change splits_percent")
         return self.X_splits[2], self.Y_splits[2]
 
+
+def one_hot_encode(y):
+    num_classes = np.max(y) + 1
+    one_hot = np.zeros((num_classes, len(y)))
+    for i, label in enumerate(y):
+        one_hot[label, i] = 1
+    return one_hot.T
 
 if __name__ == '__main__':
     length = 1000

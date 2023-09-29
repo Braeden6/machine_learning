@@ -1,15 +1,16 @@
 import numpy as np
 import pandas as pd
 from sklearn import datasets
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from utils import Data
+import matplotlib.pyplot as plt
+from utils import Data, one_hot_encode
 
 
 class NeuralNetwork:
     def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[4], verbose=False):
+        if len(Y.shape) == 1:
+            raise Exception('Y must be a 2D array')
         X = X.T
-        Y = Y.reshape((1,len(Y)))
+        Y = Y.T
 
         self.init_weights(X, Y, hidden_layers)
         for i in range(iterations):
@@ -19,7 +20,7 @@ class NeuralNetwork:
             cost = self.calculate_cost(A, Y, X)
 
             if verbose and i % 1000 == 0:
-                print(f'cost: {cost}')
+                print(f'iteration {i} cost is: {cost}')
     
     def forward_propagation(self, X):
         A = X
@@ -39,7 +40,9 @@ class NeuralNetwork:
     def predict(self, X):
         X = X.T
         A = self.forward_propagation(X)
-        return A > 0.5
+        if A.shape[0] == 1:
+            return A > 0.5
+        return np.argmax(A, axis=0)
 
     def backward_propagation(self, Y):
         m = self.As[0].shape[1]
@@ -94,24 +97,46 @@ class NeuralNetwork:
         self.b.append(b_out)
 
     def error(self, X, Y):
-        Y = Y.reshape((1,len(Y)))
+        Y = Y.T
         Y_prediction = self.predict(X)
         return np.mean(np.abs(Y_prediction - Y))
 
 
+def show_digit(image):
+    plt.imshow(image, cmap='gray')  # Use grayscale colormap
+    plt.axis('off')  # Turn off axis numbers and ticks
+    plt.show()
+
 if __name__ == '__main__':
-    iris = datasets.load_iris()
-    X = iris["data"]
-    Y = (iris["target"] == 0).astype(np.int16)
+    # iris = datasets.load_iris()
+    # X = iris["data"]
+    # Y = (iris["target"] == 0).astype(np.int16).reshape((len(iris["target"]), 1))
+    # data = Data(X, Y, [0.8,0.2])
+    # X_train, y_train = data.get_train_data()
+    # X_test, y_test = data.get_dev_data()
+    
+    # model = NeuralNetwork(X_train, y_train, 4_000, 0.01, [4], True)
+    # print(f'error {model.error(X_test, y_test)}')
+    digits = datasets.load_digits()
+    X = digits["data"]
+    print(X.shape)
+    Y = one_hot_encode(digits["target"])
     data = Data(X, Y, [0.8,0.2])
     X_train, y_train = data.get_train_data()
     X_test, y_test = data.get_dev_data()
-    
 
 
-    model = NeuralNetwork(X_train, y_train, 20_000, 0.1, [5,4], True)
-    print(f'error {model.error(X_test, y_test)}')
+    model = NeuralNetwork(X_train, y_train, 5_000, 0.1, [], True)
+    prediction = model.predict(X_test)
+    y_test = np.argmax(y_test, axis=1)
+    print(f'Acuraccy: {np.mean(prediction == y_test)}')
 
+
+    for i in range(5):
+        X_new = ((X[i] - data.mean)/data.std).reshape((1,-1))
+        prediction = model.predict(X_new)
+        print(f'prediction: {prediction}')
+        show_digit(digits.images[i])
 
 
 
