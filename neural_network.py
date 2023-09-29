@@ -3,98 +3,115 @@ import pandas as pd
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
-
+from utils import Data
 
 
 class NeuralNetwork:
-    def __init__(self, X, Y):
-        self.m = X.shape[1]
-        self.X = X
-        self.Y = Y
-        self.learning_rate = 0.01
-        self.layers = [
-            [
-                np.random.randn(4, X.shape[0]) * 0.01,
-                np.zeros((4, 1))
-            ],
-            [
-                np.random.randn(Y.shape[0], 4) * 0.01,
-                np.zeros((Y.shape[0], 1))
-            ],
-        ]
+    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[4], verbose=False):
+        X = X.T
+        Y = Y.reshape((1,len(Y)))
 
-    def sigmoid(self, z):
-        return 1 / (1 + np.exp(-z))
+        self.init_weights(X, Y, hidden_layers)
+        for i in range(iterations):
+            A = self.forward_propagation(X)
+            self.backward_propagation(Y)
+            self.update_weights(learning_rate)
+            cost = self.calculate_cost(A, Y, X)
+
+            if verbose and i % 1000 == 0:
+                print(f'cost: {cost}')
     
     def forward_propagation(self, X):
-        Z1 = np.dot(self.layers[0][0], X) + self.layers[0][1]
-        A1 = self.sigmoid(Z1)
-        Z2 = np.dot(self.layers[1][0], A1) + self.layers[1][1]
-        A2 = self.sigmoid(Z2)
-        return A1, A2, Z1, Z2
+        A = X
+        Zs = []
+        As = [X]
 
-    def backward_propagation(self, Y, X, A1, A2):
-        dZ2 = A2 - Y
-        dW2 = 1 / self.m * np.dot(dZ2, A1.T)
-        db2 = 1 / self.m * np.sum(dZ2, axis=1, keepdims=True)
-        dZ1 = np.dot(self.layers[1][0].T, dZ2) * A1 * (1 - A1)   #(1 - np.power(A1, 2))
-        dW1 = 1 / self.m * np.dot(dZ1, X.T)
-        db1 = 1 / self.m * np.sum(dZ1, axis=1, keepdims=True)
-        return dW1, db1, dW2, db2, dZ1, dZ2
-
-
-    
-    def get_cost(self, A, Y):
-        logProbs = np.multiply(np.log(A), Y) + np.multiply(np.log(1 - A), 1 - Y)
-        return -1 / self.m * np.sum(logProbs)
+        for W, b in zip(self.W, self.b):
+            Z = np.dot(W, A) + b
+            A = 1 / (1 + np.exp(-Z))
+            
+            Zs.append(Z)
+            As.append(A)
+        self.Zs = Zs
+        self.As = As
+        return As[-1]
 
     def predict(self, X):
-        A1, A2, Z1, Z2 = self.forward_propagation(X)
-        predictions = A2 > 0.5
-        return predictions
+        X = X.T
+        A = self.forward_propagation(X)
+        return A > 0.5
+
+    def backward_propagation(self, Y):
+        m = self.As[0].shape[1]
+        L = len(self.W)
+        
+        dWs = []
+        dbs = []
+
+        # Start with the output layer
+        dZ = self.As[-1] - Y
+        for l in reversed(range(L)):
+            dW = 1 / m * np.dot(dZ, self.As[l].T)
+            db = 1 / m * np.sum(dZ, axis=1, keepdims=True)
+            dZ = np.dot(self.W[l].T, dZ) * self.As[l] * (1 - self.As[l])
+            
+            dWs.insert(0, dW) 
+            dbs.insert(0, db)
+            
+
+        self.dWs = dWs
+        self.dbs = dbs
+
+    def update_weights(self, learning_rate):
+        L = len(self.W)
+        for l in range(L):
+            self.W[l] -= learning_rate * self.dWs[l]
+            self.b[l] -= learning_rate * self.dbs[l]
+
+    def calculate_cost(self, A, Y, X):
+        logProbs = np.multiply(np.log(A), Y) + np.multiply(np.log(1 - A), 1 - Y)
+        return -1 / X.shape[1] * np.sum(logProbs)
+
+    def init_weights(self, X, Y, hidden_layers):
+        self.W = []
+        self.b = []
+        
+        input_size = X.shape[0]
+        
+        # Initialize weights and biases for hidden layers
+        for nodes in hidden_layers:
+            W_layer = np.random.randn(nodes, input_size) * 0.01
+            b_layer = np.zeros((nodes, 1))
+            self.W.append(W_layer)
+            self.b.append(b_layer)
+            input_size = nodes
+
+        # Initialize weights and biases for the output layer
+        W_out = np.random.randn(Y.shape[0], input_size) * 0.01
+        b_out = np.zeros((Y.shape[0], 1))
+        
+        self.W.append(W_out)
+        self.b.append(b_out)
+
+    def error(self, X, Y):
+        Y = Y.reshape((1,len(Y)))
+        Y_prediction = self.predict(X)
+        return np.mean(np.abs(Y_prediction - Y))
+
+
+if __name__ == '__main__':
+    iris = datasets.load_iris()
+    X = iris["data"]
+    Y = (iris["target"] == 0).astype(np.int16)
+    data = Data(X, Y, [0.8,0.2])
+    X_train, y_train = data.get_train_data()
+    X_test, y_test = data.get_dev_data()
     
-    def train(self, iterations):
-        for i in range(iterations):
-            A1, A2, Z1, Z2 = self.forward_propagation(self.X)
-            dW1, db1, dW2, db2, dZ1, dZ2 = self.backward_propagation(self.Y, self.X, A1, A2)
-
-            self.layers[0][0] -= self.learning_rate * dW1
-            self.layers[0][1] -= self.learning_rate * db1
-            self.layers[1][0] -= self.learning_rate * dW2
-            self.layers[1][1] -= self.learning_rate * db2
-
-            if i % 1000 == 0:
-                cost = self.get_cost(A2, self.Y)
-                print("cost after iteration %i: %f" % (i, cost))
 
 
-        return 0
+    model = NeuralNetwork(X_train, y_train, 20_000, 0.1, [5,4], True)
+    print(f'error {model.error(X_test, y_test)}')
 
-X = np.array([[1, 2, 3, 4], [2, 4, 1, 5]])  
-Y = np.array([[0, 1, 0, 1]])
-print(X.shape)
-
-def prepare_data(X, Y):
-    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2, random_state=42)
-    scaler = StandardScaler()
-    Xtrain = scaler.fit_transform(Xtrain)
-    Xtest = scaler.transform(Xtest)
-    return Xtrain, Xtest, Ytrain.reshape((len(Ytrain),1)), Ytest.reshape((len(Ytest),1))
-
-iris = datasets.load_iris()
-X = iris["data"]
-y = (iris["target"] == 0).astype(np.int16)
-X_train, X_test, y_train, y_test = prepare_data(X, y)
-
-print(X_train.shape)
-
-# model = NeuralNetwork(X_train, y_train)
-# model.train(10000)
-
-# predictions = model.predict(X_test)
-
-# print("Accuracy: %f" % (np.sum(predictions == y_test) / len(y_test)))
 
 
 
