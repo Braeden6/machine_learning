@@ -25,65 +25,52 @@ from enum import Enum
 
 # Outlier detection  ...
 
-
-class ActivationFunction(Enum):
-    SIGMOID = 1
-    RELU = 2
-
+class Sigmoid:
     @staticmethod
-    def sigmoid(Z):
+    def function(Z):
         Z = np.clip(Z, -500, 500)
         return 1 / (1 + np.exp(-Z))
-    
+
     @staticmethod
-    def derivative_sigmoid(Z):
-        return ActivationFunction.sigmoid(Z) * (1 - ActivationFunction.sigmoid(Z))
-    
+    def derivative(Z):
+        s = Sigmoid.function(Z)
+        return s * (1 - s)
+
     @staticmethod
-    def relu(Z):
+    def init_weights(nodes, prev_nodes):
+        return np.random.randn(nodes, prev_nodes) * np.sqrt(2 / prev_nodes)
+
+class Relu:
+    @staticmethod
+    def function(Z):
         return np.maximum(0, Z)
 
     @staticmethod
-    def derivative_relu(Z):
+    def derivative(Z):
         return np.where(Z > 0, 1, 0)
-    
-    @staticmethod
-    def activation(Z, activation_function):
-        if activation_function == ActivationFunction.SIGMOID:
-            return ActivationFunction.sigmoid(Z)
-        elif activation_function == ActivationFunction.RELU:
-            return ActivationFunction.relu(Z)
-        else:
-            raise Exception('Activation function not supported')
-        
-    @staticmethod
-    def derivative_activation(Z, activation_function):
-        if activation_function == ActivationFunction.SIGMOID:
-            return ActivationFunction.derivative_sigmoid(Z)
-        elif activation_function == ActivationFunction.RELU:
-            return ActivationFunction.derivative_relu(Z)
-        else:
-            raise Exception('Activation function not supported')
-        
-    @staticmethod
-    def init_layer_weights(nodes, prev_nodes, activation_function):
-        if activation_function == ActivationFunction.SIGMOID:
-            return ActivationFunction.sigmoid_init_weights(nodes, prev_nodes)
-        elif activation_function == ActivationFunction.RELU:
-            return ActivationFunction.relu_init_weights(nodes, prev_nodes)
-        else:
-            raise Exception('Activation function not supported')
-        
-    @staticmethod
-    def sigmoid_init_weights(nodes, prev_nodes):
-        return np.random.randn(nodes, prev_nodes) * np.sqrt(2 / prev_nodes)
 
     @staticmethod
-    def relu_init_weights(nodes, prev_nodes):
+    def init_weights(nodes, prev_nodes):
         return np.random.randn(nodes, prev_nodes) * np.sqrt(2 / prev_nodes)
+
+class Tanh:
+    @staticmethod
+    def function(Z):
+        return np.tanh(Z)
+
+    @staticmethod
+    def derivative(Z):
+        return 1.0 - np.tanh(Z)**2
+
+    @staticmethod
+    def init_weights(nodes, prev_nodes):
+        # Xavier/Glorot initialization is often used for tanh
+        return np.random.randn(nodes, prev_nodes) * np.sqrt(1. / prev_nodes)
+
+
 
 class NeuralNetwork:
-    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[(4, ActivationFunction.SIGMOID)], output_layer=ActivationFunction.SIGMOID, verbose=False):
+    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[(4, Sigmoid)], output_layer=Sigmoid, verbose=False):
         if len(Y.shape) == 1:
             raise Exception('Y must be a 2D array')
         X = X.T
@@ -107,7 +94,7 @@ class NeuralNetwork:
 
         for i, (W, b) in enumerate(zip(self.W, self.b)):
             Z = np.dot(W, A) + b
-            A = ActivationFunction.activation(Z, self.activation_functions[i])
+            A = self.activation_functions[i].function(Z)
             
             Zs.append(Z)
             As.append(A)
@@ -127,7 +114,7 @@ class NeuralNetwork:
         for l in reversed(range(L)):
             dW = 1 / m * np.dot(dZ, self.As[l].T)
             db = 1 / m * np.sum(dZ, axis=1, keepdims=True)
-            dZ = np.dot(self.W[l].T, dZ) * ActivationFunction.derivative_activation(self.As[l], self.activation_functions[l])
+            dZ = np.dot(self.W[l].T, dZ) * self.activation_functions[l].derivative(self.As[l])
             
             dWs.insert(0, dW) 
             dbs.insert(0, db)
@@ -162,12 +149,13 @@ class NeuralNetwork:
         # Initialize weights and biases for hidden layers
         i= 0
         for nodes, activation_function in hidden_layers:
-            W_layer = ActivationFunction.init_layer_weights(nodes, input_size, activation_function)
+            W_layer = activation_function.init_weights(nodes, input_size)
             b_layer = np.zeros((nodes, 1))
-            self.activation_functions.append(activation_function)
+            
             i += 1
             self.W.append(W_layer)
             self.b.append(b_layer)
+            self.activation_functions.append(activation_function)
             input_size = nodes
 
         # Initialize weights and biases for the output layer
@@ -209,8 +197,9 @@ def plot_decision_boundary(model, X, Y):
 if __name__ == '__main__':
     visual_2D = True
     if not visual_2D:
-        # data = datasets.load_digits()
-        data = datasets.load_iris()
+        print('Loading data...')
+        data = datasets.load_digits()
+        # data = datasets.load_iris()
         X = data["data"]
         Y = one_hot_encode(data["target"])
 
@@ -218,7 +207,12 @@ if __name__ == '__main__':
         X_train, y_train = data.get_train_data()
         X_test, y_test = data.get_dev_data()
 
-        model = NeuralNetwork(X_train, y_train, 10_000, 0.1, [(4,ActivationFunction.RELU)], output_layer=ActivationFunction.SIGMOID, verbose=True)
+        model = NeuralNetwork(X_train, y_train, 
+                              iterations=4000, 
+                              learning_rate=0.01, 
+                              hidden_layers=[(4,Tanh)], 
+                              output_layer=Sigmoid, 
+                              verbose=True)
         prediction = model.predict(X_test)
         y_test = np.argmax(y_test, axis=1)
         print(f'Accuracy: {np.mean(prediction == y_test)}')
@@ -234,7 +228,12 @@ if __name__ == '__main__':
         X, Y = datasets.make_moons(n_samples=400, noise=0.2, random_state=0)
         Y = Y.reshape((-1,1))
 
-        model = NeuralNetwork(X, Y, 20000, 0.1, [(6,ActivationFunction.RELU),(6,ActivationFunction.RELU),(6,ActivationFunction.RELU),(6,ActivationFunction.RELU),(6,ActivationFunction.RELU)], output_layer=ActivationFunction.SIGMOID, verbose=True)
+        model = NeuralNetwork(X, Y, 
+                              iterations=20000, 
+                              learning_rate=0.1, 
+                              hidden_layers=[(6,Tanh),(6,Relu),(6,Relu),(6,Relu),(6,Relu)], 
+                              output_layer=Relu, 
+                              verbose=True)
         prediction = model.predict(X=X)
         print(f'Accuracy: {np.mean(prediction == Y.T)}')
 
