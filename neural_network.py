@@ -7,22 +7,20 @@ from enum import Enum
 
 # TODO:
 # https://chat.openai.com/share/bc7547c5-a987-4820-9fc7-78df16a2f39c
-# - Add more activation functions: tanh, relu. Other in future Leaky ReLU, Parametric ReLU, Swish, Softmax, ELU, SELU
-# - Add regularization L2 and Dropout. Other things in future: L1 (maybe not as it isnt used much), 
-#       Elastic Net, Weight Noise, Weight Decay, Weight Constraints, Gradient Clipping, Max-Norm Regularization, Noise Injection
+# - Add regularization Dropout
 # - Mini-batch gradient descent
 # - Learning rate decay
-
 # - Gradient checking
+# - Add regression support, MSE/MAE cost function
 
-
-# - Others: Batch normalization, Early stopping, Data augmentation
-
-# - ResNet, DenseNet ... etc
-
-# - Min-Max scaling, Z-score normalization, Decimal Scaling, Mean Normalization, Unit Vector Scaling, Robust Scaling, Power Transformation, Log Transformation, 
+# Others:
+# Regularization: L1, Elastic Net, Weight Noise, Weight Decay, 
+#       Weight Constraints, Gradient Clipping, Max-Norm Regularization, Noise Injection
+# NN Structure: ResNet, DenseNet ... etc
+# Normalization: Min-Max scaling, Z-score normalization, Decimal Scaling, Mean Normalization, Unit Vector Scaling, Robust Scaling, Power Transformation, Log Transformation, 
 #       Quantile Transformation, Batch Normalization, Layer Normalization, Contrast Normalization, Softmax Normalization 
-
+# Activations: Leaky ReLU, Parametric ReLU, Swish, Softmax, ELU, SELU
+# Batch normalization, Early stopping, Data augmentation
 # Outlier detection  ...
 
 class Sigmoid:
@@ -70,11 +68,12 @@ class Tanh:
 
 
 class NeuralNetwork:
-    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[(4, Sigmoid)], output_layer=Sigmoid, verbose=False):
+    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[(4, Sigmoid)], output_layer=Sigmoid, lambd=0, verbose=False):
         if len(Y.shape) == 1:
             raise Exception('Y must be a 2D array')
         X = X.T
         Y = Y.T
+        self.lambd = lambd
         self.init_weights(X, Y, hidden_layers, output_layer)
         tic = time.time()
         for i in range(iterations):
@@ -105,23 +104,16 @@ class NeuralNetwork:
     def backward_propagation(self, Y):
         m = self.As[0].shape[1]
         L = len(self.W)
-        
-        dWs = []
-        dbs = []
-
+        self.dWs = []
+        self.dbs = []
         # Start with the output layer
         dZ = self.As[-1] - Y
         for l in reversed(range(L)):
-            dW = 1 / m * np.dot(dZ, self.As[l].T)
+            dW = 1 / m * np.dot(dZ, self.As[l].T) + (self.lambd / m) * self.W[l]
             db = 1 / m * np.sum(dZ, axis=1, keepdims=True)
             dZ = np.dot(self.W[l].T, dZ) * self.activation_functions[l].derivative(self.As[l])
-            
-            dWs.insert(0, dW) 
-            dbs.insert(0, db)
-            
-
-        self.dWs = dWs
-        self.dbs = dbs
+            self.dWs.insert(0, dW) 
+            self.dbs.insert(0, db)
 
     def predict(self, X):
         X = X.T
@@ -136,9 +128,21 @@ class NeuralNetwork:
             self.W[l] -= learning_rate * self.dWs[l]
             self.b[l] -= learning_rate * self.dbs[l]
 
-    def calculate_cost(self, A, Y, X):
+    def calculate_cost(self, A, Y, X, epsilon=1e-15):
+        A = np.clip(A, epsilon, 1 - epsilon)
         logProbs = np.multiply(np.log(A), Y) + np.multiply(np.log(1 - A), 1 - Y)
-        return -1 / X.shape[1] * np.sum(logProbs)
+        cross_entropy_cost = -1 / X.shape[1] * np.sum(logProbs)
+
+        # if L2 regularization is used
+        if self.lambd > 0:
+            m = X.shape[1]
+            L2_cost = 0
+            for l in range(len(self.W)):
+                L2_cost += np.sum(np.square(self.W[l]))
+            L2_cost *= self.lambd / (2 * m)
+            return cross_entropy_cost + L2_cost
+        
+        return cross_entropy_cost
 
     def init_weights(self, X, Y, hidden_layers, output_layer):
         self.W = []
@@ -224,15 +228,16 @@ if __name__ == '__main__':
         #     show_digit(data.images[i])
 
     else:
-
+        # make_circles
+        # make_classification
         X, Y = datasets.make_moons(n_samples=400, noise=0.2, random_state=0)
         Y = Y.reshape((-1,1))
-
         model = NeuralNetwork(X, Y, 
                               iterations=20000, 
                               learning_rate=0.1, 
                               hidden_layers=[(6,Tanh),(6,Relu),(6,Relu),(6,Relu),(6,Relu)], 
                               output_layer=Relu, 
+                              lambd=0.1,
                               verbose=True)
         prediction = model.predict(X=X)
         print(f'Accuracy: {np.mean(prediction == Y.T)}')
