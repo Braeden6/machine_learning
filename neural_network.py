@@ -3,13 +3,9 @@ import time
 from sklearn import datasets
 import matplotlib.pyplot as plt
 from utils import Data, one_hot_encode
-from enum import Enum
 
 # TODO:
 # https://chat.openai.com/share/bc7547c5-a987-4820-9fc7-78df16a2f39c
-# - Add regularization Dropout
-# - Mini-batch gradient descent
-# - Learning rate decay
 # - Gradient checking
 # - Add regression support, MSE/MAE cost function
 
@@ -23,6 +19,7 @@ from enum import Enum
 # Batch normalization, Early stopping, Data augmentation
 # Outlier detection  ...
 
+# Actions:
 class Sigmoid:
     @staticmethod
     def function(Z):
@@ -65,27 +62,96 @@ class Tanh:
         # Xavier/Glorot initialization is often used for tanh
         return np.random.randn(nodes, prev_nodes) * np.sqrt(1. / prev_nodes)
 
+# Learning Rate Decay:
+def no_decay(learning_rate, epochs, iteration):
+    return learning_rate
 
+def exponential_decay(learning_rate, epochs, iteration, k=0.25):
+    return learning_rate * np.exp(-iteration / (epochs * k))
+
+def inverse_time_decay(learning_rate, epochs, iteration, k=40):
+    return learning_rate / (1 + k * iteration/epochs)
+
+# Linear by default
+def polynomial_decay(learning_rate, epochs, iteration, k=1.02, p=1.0):
+    return  learning_rate * (1 - iteration/(epochs*k))**p
 
 class NeuralNetwork:
-    def __init__(self, X, Y, iterations=1000, learning_rate=0.1, hidden_layers=[(4, Sigmoid)], output_layer=Sigmoid, lambd=0, verbose=False):
+    def __init__(self, X, Y, 
+                 epochs=1000, 
+                 learning_rate=0.1, 
+                 learning_rate_decay=polynomial_decay,
+                 hidden_layers=[(4, Sigmoid)], 
+                 output_layer=Sigmoid, 
+                 lambd=0,  # 0 turns off L2 Regularization
+                 keep_prob=1, # 1 turns off dropout 
+                 mini_batch_size=0, # zero turns off mini batch
+                 verbose=False):
         if len(Y.shape) == 1:
             raise Exception('Y must be a 2D array')
         X = X.T
         Y = Y.T
+        if mini_batch_size == 0:
+            mini_batch_size = X.shape[0]
+        self.mini_batch_size = mini_batch_size
         self.lambd = lambd
+        self.keep_prob = keep_prob
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self.print_frequency = max(1, 10**(int(np.log10(self.epochs)) - 1))
+
         self.init_weights(X, Y, hidden_layers, output_layer)
         tic = time.time()
-        for i in range(iterations):
+        for i in range(epochs):
+            self.learning_rate = learning_rate_decay(learning_rate, epochs, i)
+            
+            # Create mini-batches
+            mini_batch_X, mini_batch_Y = self.random_mini_batches(X, Y, self.mini_batch_size)
+            
+            for mini_batch_X, mini_batch_Y in zip(mini_batch_X, mini_batch_Y):
+                A = self.forward_propagation(mini_batch_X)
+                self.backward_propagation(mini_batch_Y)
+                self.update_weights()
+            
+            # Calculate cost on the entire dataset or on a mini-batch for logging
             A = self.forward_propagation(X)
-            self.backward_propagation(Y)
-            self.update_weights(learning_rate)
             cost = self.calculate_cost(A, Y, X)
 
-            if verbose and i % 1000 == 0:
-                print(f'iteration {i} cost is: {cost} took: {round(time.time() - tic, 3)} seconds')
+            if verbose and i % self.print_frequency == 0:
+                print(f'''epoch {i}:
+                cost is: {cost} 
+                took: {round(time.time() - tic, 3)} seconds
+                learning rate: {self.learning_rate}''')
                 tic = time.time()
     
+    def random_mini_batches(self, X, Y, mini_batch_size=64, seed=None):
+        if seed:
+            np.random.seed(seed)
+        
+        m = X.shape[1] 
+        mini_batches_X = []
+        mini_batches_Y = []
+        
+        permutation = list(np.random.permutation(m))
+        shuffled_X = X[:, permutation]
+        shuffled_Y = Y[:, permutation]
+
+        def get_batch(min,max, X,Y):
+            return X[:,min:max], Y[:,min:max]
+
+        num_complete_minibatches = m // mini_batch_size
+        for k in range(0, num_complete_minibatches):
+            mini_batch_X, mini_batch_Y = get_batch(k * mini_batch_size, (k + 1) * mini_batch_size, shuffled_X, shuffled_Y)
+            mini_batches_X.append(mini_batch_X)
+            mini_batches_Y.append(mini_batch_Y)
+
+        if m % mini_batch_size != 0:
+            mini_batch_X, mini_batch_Y = get_batch(num_complete_minibatches * mini_batch_size, m, shuffled_X, shuffled_Y)
+            mini_batches_X.append(mini_batch_X)
+            mini_batches_Y.append(mini_batch_Y)
+
+        return mini_batches_X, mini_batches_Y
+
     def forward_propagation(self, X):
         A = X
         Zs = []
@@ -109,9 +175,12 @@ class NeuralNetwork:
         # Start with the output layer
         dZ = self.As[-1] - Y
         for l in reversed(range(L)):
-            dW = 1 / m * np.dot(dZ, self.As[l].T) + (self.lambd / m) * self.W[l]
+            dropout = np.random.rand(self.As[l].shape[0], self.As[l].shape[1]) < self.keep_prob
+            A = self.As[l] * dropout
+            A /= self.keep_prob
+            dW = 1 / m * np.dot(dZ, A.T) + (self.lambd / m) * self.W[l]
             db = 1 / m * np.sum(dZ, axis=1, keepdims=True)
-            dZ = np.dot(self.W[l].T, dZ) * self.activation_functions[l].derivative(self.As[l])
+            dZ = np.dot(self.W[l].T, dZ) * self.activation_functions[l].derivative(A)
             self.dWs.insert(0, dW) 
             self.dbs.insert(0, db)
 
@@ -122,11 +191,11 @@ class NeuralNetwork:
             return A > 0.5
         return np.argmax(A, axis=0)
 
-    def update_weights(self, learning_rate):
+    def update_weights(self):
         L = len(self.W)
         for l in range(L):
-            self.W[l] -= learning_rate * self.dWs[l]
-            self.b[l] -= learning_rate * self.dbs[l]
+            self.W[l] -= self.learning_rate * self.dWs[l]
+            self.b[l] -= self.learning_rate * self.dbs[l]
 
     def calculate_cost(self, A, Y, X, epsilon=1e-15):
         A = np.clip(A, epsilon, 1 - epsilon)
@@ -174,7 +243,6 @@ class NeuralNetwork:
         Y_prediction = self.predict(X)
         return np.mean(np.abs(Y_prediction - Y))
 
-
 def show_digit(image):
     plt.imshow(image, cmap='gray')
     plt.axis('off')
@@ -198,9 +266,31 @@ def plot_decision_boundary(model, X, Y):
     plt.ylabel('Feature 2')
     plt.show()
 
+def plot_decay(learning_rate=0.1, epochs=10000):
+    iterations = np.arange(0, epochs, 1)
+
+    # Compute learning rates for all iterations
+    inv_decay = [inverse_time_decay(learning_rate, epochs, it) for it in iterations]
+    linear_decay = [polynomial_decay(learning_rate, epochs, it, p=1) for it in iterations]
+    quadratic_decay = [polynomial_decay(learning_rate, epochs, it, p=2) for it in iterations]
+    exp_decay = [exponential_decay(learning_rate, epochs, it) for it in iterations]
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(iterations, inv_decay, label='Inverse Time Decay', color='blue')
+    plt.plot(iterations, linear_decay, label='Linear Decay', color='red')
+    plt.plot(iterations, quadratic_decay, label='Quadratic Decay', color='green')
+    plt.plot(iterations, exp_decay, label='Exponential Decay', color='orange')
+    plt.title('Learning Rate Scheduling: Inverse Time Decay')
+    plt.xlabel('Iteration')
+    plt.ylabel('Learning Rate')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
 if __name__ == '__main__':
-    visual_2D = True
-    if not visual_2D:
+    step = 'vis_model' # data, vis_model, vis_decay
+    if step == 'data':
         print('Loading data...')
         data = datasets.load_digits()
         # data = datasets.load_iris()
@@ -212,8 +302,8 @@ if __name__ == '__main__':
         X_test, y_test = data.get_dev_data()
 
         model = NeuralNetwork(X_train, y_train, 
-                              iterations=4000, 
-                              learning_rate=0.01, 
+                              epochs=4000, 
+                              learning_rate=lambda x: x*0.9999, 
                               hidden_layers=[(4,Tanh)], 
                               output_layer=Sigmoid, 
                               verbose=True)
@@ -227,24 +317,28 @@ if __name__ == '__main__':
         #     print(f'prediction: {prediction}')
         #     show_digit(data.images[i])
 
-    else:
+    elif step == 'vis_model':
         # make_circles
         # make_classification
-        X, Y = datasets.make_moons(n_samples=400, noise=0.2, random_state=0)
+        X, Y = datasets.make_moons(n_samples=10000, noise=.2, random_state=0)
         Y = Y.reshape((-1,1))
         model = NeuralNetwork(X, Y, 
-                              iterations=20000, 
+                              epochs=100, 
                               learning_rate=0.1, 
-                              hidden_layers=[(6,Tanh),(6,Relu),(6,Relu),(6,Relu),(6,Relu)], 
+                              learning_rate_decay=polynomial_decay,
+                              hidden_layers=[(10,Relu),(15,Relu), (15,Relu), (10,Relu)], 
                               output_layer=Relu, 
                               lambd=0.1,
+                              keep_prob=0.8,
+                              mini_batch_size=64,
                               verbose=True)
         prediction = model.predict(X=X)
         print(f'Accuracy: {np.mean(prediction == Y.T)}')
 
-        plot_decision_boundary(model, X, Y)
+        plot_decision_boundary(model, X[0:200], Y[0:200])
 
-
+    elif step == 'vis_decay':
+        plot_decay(learning_rate=0.1, epochs=10000)
     
 
 
